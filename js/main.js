@@ -820,4 +820,149 @@ marker_layer.on('dragend', function () {
 
 addMarker(marker_layer, 0);
 addMarker(marker_layer, 10);
-// addMarker(marker_layer, 20);
+
+stage.on('wheel', (e) => {
+    e.evt.preventDefault();
+    let oldScale = stage.scaleX();
+    let pointer = stage.getPointerPosition();
+
+    let mousePointTo = {
+        x: (pointer.x - stage.x()) / oldScale,
+        y: (pointer.y - stage.y()) / oldScale,
+    };
+
+    let newScale = e.evt.deltaY < 0 ? oldScale * ZOOM_BY : oldScale / ZOOM_BY;
+    
+    if (newScale > ZOOM_LIMIT_MAX) newScale = ZOOM_LIMIT_MAX;
+    if (newScale < ZOOM_LIMIT_MIN) newScale = ZOOM_LIMIT_MIN;
+
+    stage.scale({ x: newScale, y: newScale });
+
+    let newPos = {
+        x: pointer.x - mousePointTo.x * newScale,
+        y: pointer.y - mousePointTo.y * newScale,
+    };
+    stage.position(newPos);
+    stage.batchDraw();
+});
+
+stage.on('mousedown', (e) => {
+    if (e.target === stage) {
+        stage.draggable(true);
+    } else {
+        stage.draggable(false);
+    }
+});
+
+stage.on('mouseup', () => {
+    stage.draggable(false);
+});
+
+window.addEventListener('keydown', (e) => {
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+        const selectedNodes = tr.nodes();
+        selectedNodes.forEach(node => node.destroy());
+        tr.nodes([]);
+        marker_layer.batchDraw();
+        updateCoordinates();
+    }
+});
+
+
+createMarkers = function () {
+    let modal = new tingle.modal({
+        footer: true,
+        stickyFooter: false,
+        closeMethods: ['overlay', 'button', 'escape'],
+        cssClass: ['trash-screen'],
+        onClose: function () {
+            let els = document.getElementsByClassName('trash-screen');
+            while(els.length > 0) els[0].remove();
+        }
+    });
+
+    modal.setContent(`
+        <h1>Импорт карты</h1>
+        <textarea class="tingle-textarea" id="marker-id-input" 
+                  style="height:300px; font-family: monospace;" 
+                  placeholder="Вставьте столбцы: id length x y z rot_z ..."></textarea>
+    `);
+
+    modal.addFooterBtn('Импортировать', 'tingle-btn tingle-btn--primary', function () {
+        try {
+            let text = document.getElementById('marker-id-input').value;
+            let lines = text.split('\n');
+            
+            lines.forEach(line => {
+                line = line.trim();
+                if (line === '' || line.startsWith('#')) return;
+
+                let p = line.split(/\s+/);
+                
+                if (p.length >= 6) {
+                    let markerData = {
+                        id: parseInt(p[0]),
+                        size: 100 * parseFloat(p[1]),
+                        x: 100 * parseFloat(p[2]),
+                        y: 100 * parseFloat(p[3]),
+                        z: 100 * parseFloat(p[4]),
+                        rotZ: parseFloat(p[5]) // радианы
+                    };
+
+                    let _marker = generateMarker(marker_layer, markerData.id);
+                    
+                    _marker.rotation(markerData.rotZ * 180 / Math.PI);
+                    
+                    let new_scale = markerData.size / (PIXEL_SIZE * (MARKER_SIZE + 2));
+                    _marker.scaleX(new_scale);
+                    _marker.scaleY(new_scale);
+                    
+                    let width = PIXEL_SIZE * (MARKER_SIZE + 2) * new_scale;
+                    let rad = _marker.rotation() * Math.PI / 180;
+                    
+                    _marker.x(markerData.x - width * (Math.cos(rad) - Math.sin(rad)) / 2);
+                    _marker.y(-markerData.y - width * (Math.cos(rad) + Math.sin(rad)) / 2);
+                    _marker.z_axis = markerData.z;
+
+                    marker_layer.add(_marker);
+                }
+            });
+
+            computezlogic();
+            marker_layer.batchDraw();
+            updateCoordinates();
+            modal.close();
+        } catch (err) {
+            alert('Ошибка в данных');
+            console.error(err);
+        }
+    });
+
+    modal.open();
+};
+
+function addLogo() {
+    let input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = ev => {
+        let reader = new FileReader();
+        reader.onload = e => {
+            let img = new Image();
+            img.onload = () => {
+                let kImg = new Konva.Image({
+                    image: img,
+                    x: 50, y: -50,
+                    width: 100, height: 100,
+                    draggable: true,
+                    name: 'marker'
+                });
+                marker_layer.add(kImg);
+                marker_layer.batchDraw();
+            };
+            img.src = e.target.result;
+        };
+        reader.readAsDataURL(ev.target.files[0]);
+    };
+    input.click();
+}
